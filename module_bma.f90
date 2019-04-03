@@ -359,8 +359,8 @@
       IF(NGROUPS .EQ. NMEM) THEN
 !        
 !          IF EACH MEMBER IS ALLOWED ITS OWN WEIGHT THEN
-!          THE UPDATE IS SIMPLE 
-!        
+!          THE UPDATE IS SIMPLE
+!
 !
         SD=(SUM(Z*RSQ,MASK=Z.NE.XMISS)/SUM(Z,MASK=Z.NE.XMISS))**(.5)
 !
