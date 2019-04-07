@@ -3,6 +3,7 @@
 
 import os
 os.chdir('/home/qxs/bma/')
+import shutil
 from ncprocess import ECEns, ECFine, GFSFcst, GEFSFcst, BMA, NCData
 import numpy as np
 import warnings
@@ -10,13 +11,13 @@ import arrow
 import glob
 
 
-def train_prepare(data_path, time_list, region, fcst_time):
+def train_prepare(data_path, time_list, region, ini_time):
     products = ['gefs_fcst', 'ec_ens', 'ec_fine']
     for product in products[:3]:
-        dirs = glob.glob(data_path['bma_fcst'] + 'extract_*')
+        dirs = glob.glob(data_path[product] + 'extract_*')
         for dir in dirs:
             try:
-                os.removedirs(dir)
+                shutil.rmtree(dir)
             except OSError:
                 pass
         for time in time_list[:]:
@@ -31,20 +32,14 @@ def train_prepare(data_path, time_list, region, fcst_time):
                 train = GEFSFcst(data_path[product], time, base_path)
             else:
                 train = ECFine(data_path[product], time, base_path)
-            if product == 'gefs_fcst':
-                uv_files = []
-                for n in range(21):
-                    uv_files.append(train.download(n))
-                train.wind_composite(uv_files)
-            else:
-                uv_files = train.download()
-                train.wind_composite(uv_files)
+            uv_files = train.download()
+            train.wind_composite(uv_files)
         train_all = NCData(data_path[product], 'enforced')
         merge_file, ens_num = train_all.merge_time(time_list)
-        train_all.extract_all(merge_file, region, fcst_time)
+        train_all.extract_all(merge_file, region, ini_time)
 
 
-def fcst_prepare(data_path, time_list, region, fcst_time):
+def fcst_prepare(data_path, time_list, region, ini_time):
     products = ['gefs_fcst', 'ec_ens']
     model_info = {}
     for product in products[:2]:
@@ -58,32 +53,33 @@ def fcst_prepare(data_path, time_list, region, fcst_time):
                 fcst = GFSFcst(data_path[product], time, base_path)
             else:
                 fcst = GEFSFcst(data_path[product], time, base_path)
-            if product == 'gefs_fcst':
-                uv_files = []
-                for n in range(21):
-                    uv_files.append(fcst.download(n))
-                fcst.wind_composite(uv_files)
-            else:
-                uv_files = fcst.download()
-                fcst.wind_composite(uv_files)
+            uv_files = fcst.download()
+            fcst.wind_composite(uv_files)
         fcst_all = NCData(data_path[product], 'unenforced')
         merge_file, ens_num = fcst_all.merge_time(time_list)
         if merge_file is not None:
             model_info[product] = ens_num
-            fcst_all.extract_all(merge_file, region, fcst_time)
+            fcst_all.extract_all(merge_file, region, ini_time)
     return model_info
 
 
-def bma_method(data_path, time_list, region, train_num, all_num, model_info, fcst_time):
-    dirs = glob.glob(data_path['bma_fcst'] + 'bma_point_*')
-    for dir in dirs:
-        try:
-            os.removedirs(dir)
-        except OSError:
-            pass
-    single_bma = BMA(data_path, region, time_list, fcst_time)
-    single_bma.process_all(train_num, all_num, model_info)
-    single_bma.point2nc()
+def bma_method(data_path, fcst_list, region, train_num, all_num, model_info):
+    for fcst_time in fcst_list:
+        dirs = glob.glob(data_path['bma_fcst'] + 'bma_point_*')
+        for dir in dirs:
+            try:
+                shutil.rmtree(dir)
+            except OSError:
+                pass
+        dirs = glob.glob(data_path['bma_fcst'] + 'extract*')
+        for dir in dirs:
+            try:
+                shutil.rmtree(dir)
+            except OSError:
+                pass
+        single_bma = BMA(data_path, fcst_time, region, model_info)
+        single_bma.process_all(train_num, all_num)
+        single_bma.point2nc()
 
 
 def main():
@@ -105,17 +101,16 @@ def main():
     region = list(zip(lat.flat[:], lon.flat[:]))
     # --时间参数
     train_num = 60   # 训练数据长度
-    shift_hours = range(24, 96 + 24, 24)  # 预报时间间隔
+    shift_hours = range(24, 96 + 6, 6)  # 预报时间间隔
     time = arrow.get().now().date()   # 预报起始时间
     now = arrow.get().now().format('HH')
     if int(now) > 12:
         ini_time = arrow.get(time).shift(days=-1, hours=12)
     else:
         ini_time = arrow.get(time).shift(days=-1)
-    # ini_time = arrow.get('2018080712', 'YYYYMMDDHH')   # 预报起始时间
+    # ini_time = arrow.get('2019040400', 'YYYYMMDDHH')   # 预报起始时间
     for num in range(1):
         for shift_hour in shift_hours[:]:
-            fcst_time = ini_time.shift(hours=num*12)
             # --生成训练时间列表、预报时间列表
             train_list = []
             fcst_list = []
@@ -123,10 +118,10 @@ def main():
                 train_list.append({'ini': arrow.get(ini_time).shift(hours=-num*12), 'shift': shift_hour})
             fcst_list.append({'ini': arrow.get(ini_time), 'shift': shift_hour})
             # -- 数据处理
-            train_prepare(model_path, train_list, region, fcst_time)
-            model_info = fcst_prepare(model_path, fcst_list, region, fcst_time)
-            # model_info = {'ec_ens': 51, 'gefs_fcst':21}
-            bma_method(model_path, fcst_list, region, len(train_list), len(train_list) + len(fcst_list), model_info, fcst_time)
+            train_prepare(model_path, train_list, region, ini_time)
+            model_info = fcst_prepare(model_path, fcst_list, region, ini_time)
+            # # model_info = {'ec_ens': 51, 'gefs_fcst':21}
+            bma_method(model_path, fcst_list, region, len(train_list), len(train_list) + len(fcst_list), model_info)
 
 
 if __name__ == '__main__':

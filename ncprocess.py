@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 # email: guoappserver@gmail.com
 
-import sys
-sys.path.append("/home/qxs/bma")
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -14,6 +12,8 @@ import requests
 from pathos.pools import ProcessPool
 from ecmwfapi import ECMWFDataServer
 from tenacity import *
+import sys
+sys.path.append("/home/qxs/bma")
 import bma_method
 
 
@@ -62,8 +62,8 @@ class NCData(object):
         ws_all.to_netcdf(merge_file)
         return merge_file, ens_num
 
-    def extract_all(self, merge_file, locate, time):
-        extract_path = self.data_path + 'extract_{}/'.format(time.format('YYYYMMDDHH'))
+    def extract_all(self, merge_file, locate, ini_time):
+        extract_path = self.data_path + 'extract_{}/'.format(ini_time.format('YYYYMMDDHH'))
         try:
             os.makedirs(extract_path)
         except OSError:
@@ -96,11 +96,11 @@ class NCData(object):
 
 
 class ECReanalysis(NCData):
-    def __init__(self, data_path, time=None, base_path=None):
+    def __init__(self, data_path, time, base_path=None):
         self.data_path = data_path
         self.time = time
         self.base_path = base_path + '/'
-        super(ECReanalysis, self).__init__(self.data_path)
+        super(ECReanalysis, self).__init__(data_path)
 
     @retry(stop=(stop_after_attempt(5)))
     def download(self, vars=['u10', 'v10'], region='china'):
@@ -156,16 +156,16 @@ class ECReanalysis(NCData):
 
 
 class ECFine(NCData):
-    def __init__(self, data_path, time=None, base_path=None):
+    def __init__(self, data_path, time, base_path=None):
         self.ec_path = '/data2/ecmwf_dataset/wind_Pac/{}/'.format(time['ini'].format('YYYY'))
         self.data_path = data_path
         self.time = time
         self.base_path = base_path + '/'
-        super(ECFine, self).__init__(self.data_path)
+        super(ECFine, self).__init__(data_path)
 
     @retry(stop=(stop_after_attempt(5)))
     def download(self):
-        time = self.time['ini'].shift(hours=self.time['shift']).format('YYYYMMDDHH')
+        time = self.time['ini'].format('YYYYMMDDHH')
         uv_file = 'xbt*{}*.nc'.format(time)
         download_path = self.data_path + self.base_path
         try:
@@ -179,8 +179,8 @@ class ECFine(NCData):
                 if not os.path.exists(download_file):
                     try:
                         os.symlink(uv_file[0],  download_file)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        print(e)
             else:
                 download_file = None
             return download_file
@@ -203,12 +203,12 @@ class ECFine(NCData):
 
 
 class ECEns(NCData):
-    def __init__(self, data_path, time=None, base_path=None):
+    def __init__(self, data_path, time, base_path=None):
         self.ec_path = '/data2/ecmwf_dataset/wind_ensemble/'
         self.data_path = data_path
         self.time = time
         self.base_path = base_path + '/'
-        super(ECEns, self).__init__(self.data_path)
+        super(ECEns, self).__init__(data_path)
 
     @retry(stop=(stop_after_attempt(5)))
     def download(self):
@@ -278,7 +278,7 @@ class ECEns(NCData):
 
 
 class GFSFcst(NCData):
-    def __init__(self, data_path, time=None, base_path=None):
+    def __init__(self, data_path, time, base_path=None):
         self.host = r'https://nomads.ncdc.noaa.gov/data/gfs4/'
         self.header = {'User-Agent':
                            'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 '
@@ -286,7 +286,7 @@ class GFSFcst(NCData):
         self.data_path = data_path
         self.time = time
         self.base_path = base_path + '/'
-        super(GFSFcst, self).__init__(self.data_path)
+        super(GFSFcst, self).__init__(data_path)
 
     @retry(stop=(stop_after_attempt(5)))
     def download(self):
@@ -332,7 +332,8 @@ class GFSFcst(NCData):
 
 
 class GEFSFcst(NCData):
-    def __init__(self, data_path, time=None, base_path=None):
+    def __init__(self, data_path, time, base_path=None):
+        self.gefs_path = '/data2/gefs_dataset/'
         self.host = r'https://www.ftp.ncep.noaa.gov/data/nccf/com/gens/prod/'
         self.header = {'User-Agent':
                            'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 '
@@ -340,34 +341,28 @@ class GEFSFcst(NCData):
         self.data_path = data_path
         self.time = time
         self.base_path = base_path + '/'
-        super(GEFSFcst, self).__init__(self.data_path)
+        super(GEFSFcst, self).__init__(data_path)
 
-    @retry(stop=(stop_after_attempt(5)))
-    def download(self, num):
+    @retry()
+    def download(self):
+        grib_files = '*f0{}*.grb2'.format(str(self.time['shift']).zfill(2))
         download_path = self.data_path + self.base_path
         try:
             os.makedirs(download_path)
         except OSError:
             pass
         finally:
-            date = self.time['ini'].format('YYYYMMDD')
-            hour = self.time['ini'].format('HH')
-            host = '{}gefs.{}/{}/pgrb2ap5/'.format(self.host, date, hour)
-            if num == 0:
-                file_name = 'gec00.t{}z.pgrb2a.0p50.f{}'.format(hour, str(self.time['shift']).zfill(3))
-            else:
-                file_name = 'gep{}.t{}z.pgrb2a.0p50.f{}'.format(str(num).zfill(2), hour, str(self.time['shift']).zfill(3))
-            url = host + file_name
-            download_file = download_path + file_name + '.grb2'
-            if not os.path.exists(download_file) or os.path.getsize(download_file)/float(1024*1024) < 10:
-                print('GEFS forecast download: {}'.format(download_file))
-                response = requests.get(url, headers=self.header, stream=True, timeout=15)
-                with open(download_file, 'wb') as f:
-                    for data in response.iter_content(chunk_size=1024):
-                        if data:
-                            f.write(data)
-                            f.flush()
-        return download_file
+            download_files = []
+            grib_files = sorted(glob.glob(self.gefs_path + self.base_path + grib_files))
+            for grib_file in grib_files:
+                download_file = download_path + grib_file.split('/')[-1]
+                try:
+                    os.symlink(grib_file, download_file)
+                except OSError:
+                    pass
+                finally:
+                    download_files.append(download_file)
+            return download_files
 
     def wind_composite(self, uv_files):
         ini_time = self.time['ini'].format('YYYYMMDDHH')
@@ -377,34 +372,39 @@ class GEFSFcst(NCData):
         # os.system('rm {}'.format(composite_file))
         dataset = []
         if not os.path.exists(composite_file):
-            for uv_file in uv_files:
-                try:
-                    uv = xr.open_dataset(uv_file, engine='cfgrib',
-                                         backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
-                except Exception as e:
-                    print('GEFS fcst Wind Composite Failed: no uv files in {}: {}'.format(composite_file, e))
-                    return
-                else:
-                    print('GEFS fcst wind composite: {}'.format(composite_file))
-                    ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5})
-                    ws = ws.expand_dims(['valid_time', 'number']).drop(['time', 'step']).rename({'valid_time': 'time'})
-                    dataset.append(ws)
-            ws_ens = xr.auto_combine(dataset)
-            ws_ens.to_netcdf(composite_file)
-        idx_files = glob.glob(self.data_path + self.base_path + '*.idx')
-        for file in idx_files:
-            os.remove(file)
+            if len(uv_files) == 21:
+                for uv_file in uv_files:
+                    try:
+                        uv = xr.open_dataset(uv_file, engine='cfgrib',
+                                             backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+                    except Exception as e:
+                        print('GEFS fcst Wind composite failed: uv files broken {} -> {}'.format(uv_file, e))
+                        return
+                    else:
+                        print('GEFS fcst wind composite: {}'.format(uv_file))
+                        ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5})
+                        ws = ws.expand_dims(['valid_time', 'number']).drop(['time', 'step']).rename({'valid_time': 'time'})
+                        dataset.append(ws)
+                ws_ens = xr.auto_combine(dataset)
+                ws_ens.to_netcdf(composite_file)
+            else:
+                print('GEFS fcst wind composite failes: no enough grb files in {}'.format(self.gefs_path + self.base_path))
+        # idx_files = glob.glob(self.data_path + self.base_path + '*.idx')
+        # for file in idx_files:
+        #     os.remove(file)
 
 
 class BMA(object):
-    def __init__(self, data_path, locate, time_list, fcst_time):
-        self.time_list = time_list
+    def __init__(self, data_path, fcst_time, locate, model_info):
+        self.time = fcst_time
         self.data_path = data_path
-        self.extract_path = 'extract_{}/'.format(fcst_time.format('YYYYMMDDHH'))
-        self.bma_point_path = self.data_path['bma_fcst'] + 'bma_point_{}/'.format(fcst_time.format('YYYYMMDDHH'))
+        self.time_str = fcst_time['ini'].format('YYYYMMDDHH')
+        self.extract_path = 'extract_{}/'.format(self.time_str)
+        self.bma_point_path = self.data_path['bma_fcst'] + 'bma_point_{}/'.format(self.time_str)
         self.locate = list(locate)
+        self.model_info = model_info
 
-    def process_all(self, train_num, all_num, model_info):
+    def process_all(self, train_num, all_num):
         dirs = [self.data_path['bma_fcst'] + self.extract_path, self.bma_point_path]
         for dir_name in dirs:
             try:
@@ -413,13 +413,13 @@ class BMA(object):
                 pass
         for lat, lon in list(self.locate)[:]:
             point_file = 'point_[{},{}]'.format(str(lat), str(lon))
-            self.process_single(point_file, train_num, all_num, model_info)
+            self.process_single(point_file, train_num, all_num)
 
-    def process_single(self, point_file, train_num, all_num, model_info):
+    def process_single(self, point_file, train_num, all_num):
         bma_point_file = self.bma_point_path + point_file
         train_point_file = self.data_path['ec_fine'] + self.extract_path+ point_file
         fcst_point_file = self.data_path['bma_fcst'] + self.extract_path + point_file
-        model_point_files = list(map(lambda x: self.data_path[x] + self.extract_path + point_file, sorted(model_info.keys())))
+        model_point_files = list(map(lambda x: self.data_path[x] + self.extract_path + point_file, sorted(self.model_info.keys())))
         frames = []
         for model_point_file in model_point_files[:]:
             tmp_frame = pd.read_csv(model_point_file, sep=' ', index_col=0, header=None)
@@ -432,7 +432,7 @@ class BMA(object):
             concat_frame.round(decimals=2).to_csv(fcst_point_file, sep=' ', index=True, header=None)
         # print('BMA process: {} ---Run task {}'.format(bma_point_file, os.getpid()))
         bma_method.calculate(fcst_point_file, train_point_file, bma_point_file, train_num, all_num,
-            len(model_info.keys()), list(map(lambda x: str(model_info[x]), sorted(model_info.keys()))))
+            len(self.model_info.keys()), list(map(lambda x: str(self.model_info[x]), sorted(self.model_info.keys()))))
         # cmd = r'ifort module_bma.f90 main.f90 -o bma_process && ./bma_process {} {} {} {} {} {} {}'.format(
         #     fcst_point_file, train_point_file, bma_point_file, train_num, all_num,
         #     len(model_info.keys()), ' '.join(list(map(lambda x: str(model_info[x]), sorted(model_info.keys())))))
@@ -440,36 +440,41 @@ class BMA(object):
         # os.system(cmd)
 
     def point2nc(self):
-        threshold = ['time', 'expect', '0.05', '0.1', '0.15', '0.2', '0.25', '0.3', '0.4', '0.5']
-        for time in self.time_list:
-            ini_time = time['ini'].format('YYYYMMDDHH')
-            shift_time = str(time['shift']).zfill(2)
-            bma_grid_path = self.data_path['bma_fcst'] + ini_time + '/'
-            fcst_time = time['ini'].shift(hours=time['shift'])
-            lat_coord = sorted(list(set(list(map(lambda x: x[0], self.locate)))))
-            lon_coord = sorted(list(set(list(map(lambda x: x[1], self.locate)))))
-            time_coord = [fcst_time.datetime]
-            values = np.zeros(shape=(len(time_coord), len(threshold[1:]), len(lat_coord), len(lon_coord)))
-            data = xr.Dataset({'ws': (['time', 'threshold', 'lat', 'lon'], values)},
-                                      coords={'lon': lon_coord,
-                                                  'lat': lat_coord,
-                                                  'threshold': threshold[1:],
-                                                  'time': time_coord,})
-            for lat, lon in list(self.locate)[:]:
-                selected = dict(time=fcst_time.datetime ,lat=lat, lon=lon)
-                bma_point_file = self.bma_point_path + 'point_[{},{}]'.format(lat, lon)
-                try:
-                    result = pd.read_table(bma_point_file, sep='\s+', header=None, na_values=[9999., -9999.], names=threshold)
-                except Exception as e:
-                    print('point2nc failed {}: {}'.format(bma_point_file, e))
-                    return
-                    # data['ws'].loc[selected] = [np.nan] * len(threshold[1:])
-                else:
-                    data['ws'].loc[selected] = result[result.time==int(fcst_time.format('YYYYMMDDHH'))].iloc[0, 1:].values
+        prob = ['time', 'expect', '0.05', '0.1', '0.15', '0.2', '0.25', '0.3', '0.4', '0.5']
+        time = self.time
+        ini_time = time['ini'].format('YYYYMMDDHH')
+        shift_time = str(time['shift']).zfill(2)
+        bma_out_path = self.data_path['bma_fcst'] + ini_time + '/'
+        fcst_time = time['ini'].shift(hours=time['shift'])
+        lat_coord = sorted(list(set(list(map(lambda x: x[0], self.locate)))))
+        lon_coord = sorted(list(set(list(map(lambda x: x[1], self.locate)))))
+        time_coord = [fcst_time.datetime]
+        values = np.zeros(shape=(len(time_coord), len(prob[1:]), len(lat_coord), len(lon_coord)))
+        data = xr.Dataset({'ws': (['time', 'prob', 'lat', 'lon'], values)},
+                                  coords={'lon': lon_coord,
+                                              'lat': lat_coord,
+                                              'prob': prob[1:],
+                                              'time': time_coord,})
+        for lat, lon in list(self.locate)[:]:
+            selected = dict(time=fcst_time.datetime ,lat=lat, lon=lon)
+            bma_point_file = self.bma_point_path + 'point_[{},{}]'.format(lat, lon)
             try:
-                os.mkdir(bma_grid_path)
-            except OSError:
-                pass
-            finally:
-                for name in threshold[1:]:
-                    data.sel(threshold=name).to_netcdf(bma_grid_path + 'ws_{}_{}_{}.nc'.format(name, ini_time, shift_time))
+                result = pd.read_table(bma_point_file, sep='\s+', header=None, na_values=[9999., -9999.], names=prob)
+            except Exception as e:
+                print('point2nc failed: no {} -> {}'.format(bma_point_file, e))
+                return
+                # data['ws'].loc[selected] = [np.nan] * len(prob[1:])
+            else:
+                try:
+                    data['ws'].loc[selected] = result[result.time==int(fcst_time.format('YYYYMMDDHH'))].iloc[0, 1:].values
+                except Exception as e:
+                    print('point2nc failed in {} -> {}'.format(time, e))
+                    return
+        try:
+            os.mkdir(bma_out_path)
+        except OSError:
+            pass
+        finally:
+            data.sel(prob='expect').to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('expect', ini_time, shift_time))
+            data.sel(prob=prob[2:]).to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('prob', ini_time, shift_time))
+            print('success: {} bma file create in {} use {}'.format(shift_time, bma_out_path, self.model_info))
