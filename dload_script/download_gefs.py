@@ -3,7 +3,7 @@
 
 import sys
 sys.path.append("/home/qxs/bma/dload_script/")
-from download_fcst import GEFSFcst
+from datadl_pack import GEFSFcst
 import arrow
 from pathos.pools import ProcessPool
 
@@ -43,7 +43,7 @@ def main():
     else:
         ini_time = arrow.get(time).shift(hours=-12)
     # print(ini_time)
-    # ini_time = arrow.get('2019040312', 'YYYYMMDDHH')
+    # ini_time = arrow.get('2019040900', 'YYYYMMDDHH')
     shift_hours = range(0, 96 + 6, 6)  # 预报时间间隔
     # --生成训练时间列表、预报时间列表
     fcst_list = []

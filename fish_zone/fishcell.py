@@ -11,7 +11,7 @@ import arrow
 
 def extract_data(ws_path, uv_path, ini_time, shift_hours):
     form = 'YYYYMMDDHH'
-    info_file = r'/data1/Grid_201412-201602/detect/yuqu_div/yuqu-new-20170503.txt'
+    info_file = r'/home/qxs/bma/fish_zone/yuqu-new-20170503.txt'
     info = pd.read_csv(info_file, sep='\s+', header=None, index_col=0)
     info.columns = ['code', 'lat', 'lon']
     for index, row in info.iterrows():
