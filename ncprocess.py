@@ -13,7 +13,7 @@ from pathos.pools import ProcessPool
 from ecmwfapi import ECMWFDataServer
 from tenacity import *
 import sys
-import paramiko
+import metpy.calc as mpcalc
 sys.path.append("/home/qxs/bma")
 import bma_method
 
@@ -91,7 +91,7 @@ class NCData(object):
                 pass
 
     def extract_point(self, merge_file, extract_path, lat, lon):
-        data = xr.open_dataarray(merge_file)
+        data = xr.open_dataset(merge_file)['ws']
         time_list = data.coords['time'].values
         extract_name = '{}_[{},{}]'.format('point', str(lat), str(lon))
         extract_file = extract_path + extract_name
@@ -269,16 +269,19 @@ class ECEns(NCData):
                 else:
                     print('EC Ens wind composite: {}'.format(composite_file))
                     ws = np.zeros(shape=(u_cube.shape[0], u_cube.shape[1] + 1, u_cube.shape[2], u_cube.shape[3]))
+                    wd = np.zeros(shape=(u_cube.shape[0], u_cube.shape[1] + 1, u_cube.shape[2], u_cube.shape[3]))
                     for member in list(range(u_cube.shape[1] + 1))[:]:
                         if member != 0:
                             constraint = iris.Constraint(ensemble_member=member)
                             u = u_cube.extract(constraint).data
                             v = v_cube.extract(constraint).data
                             ws[:, member, :, :] = (u ** 2 + v ** 2) ** 0.5
+                            wd[:, member, :, :] = mpcalc.wind_direction(u, v).magnitude
                         else:
                             u = iris.load(uv_file['u_control'][0])[0][:, :, :].data
                             v = iris.load(uv_file['v_control'][0])[0][:, :, :].data
                             ws[:, 0, :, :] = (u ** 2 + v ** 2) ** 0.5
+                            wd[:, 0, :, :] = mpcalc.wind_direction(u, v).magnitude
                     ws_cube = iris.cube.Cube(ws, 'wind_speed', units='m s**-1')
                     ws_cube.add_dim_coord(u_cube.coords('time')[0], 0)
                     ws_cube.add_dim_coord(u_cube.coords('latitude')[0], 2)
@@ -286,8 +289,10 @@ class ECEns(NCData):
                     number = iris.coords.DimCoord(np.arange(u_cube.shape[1] + 1, dtype=np.int32),
                                                   standard_name=None, long_name='number', var_name='number')
                     ws_cube.add_dim_coord(number, 1)
-                    ws = xr.DataArray.from_iris(ws_cube).to_dataset().rename({'wind_speed': 'ws'})
-                    ws.to_netcdf(composite_file)
+                    ws = xr.DataArray.from_iris(ws_cube)
+                    wd = ws.copy(data=wd)
+                    wind = xr.Dataset({'ws': ws, 'wd': wd})
+                    wind.to_netcdf(composite_file)
 
 
 class GFSFcst(NCData):
@@ -395,11 +400,16 @@ class GEFSFcst(NCData):
                         return
                     else:
                         print('GEFS fcst wind composite: {}'.format(uv_file))
-                        ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5})
-                        ws = ws.expand_dims(['valid_time', 'number']).drop(['time', 'step']).rename({'valid_time': 'time'})
-                        dataset.append(ws)
-                ws_ens = xr.auto_combine(dataset)
-                ws_ens.to_netcdf(composite_file)
+                        ws = (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5
+                        print(ws)
+                        wd_value = mpcalc.wind_direction(uv["u10"], uv["v10"]).magnitude
+                        print(wd_value.shape)
+                        wd = ws.copy(data=mpcalc.wind_direction(uv["u10"], uv["v10"]).magnitude)
+                        wind = xr.Dataset({'ws': ws, 'wd': wd})
+                        wind = wind.expand_dims(['valid_time', 'number']).drop(['time', 'step']).rename({'valid_time': 'time'})
+                        dataset.append(wind)
+                wind_ens = xr.auto_combine(dataset)
+                wind_ens.to_netcdf(composite_file)
             else:
                 print('GEFS fcst wind composite failes: no enough grb files in {}'.format(self.gefs_path + self.base_path))
         idx_files = glob.glob(self.data_path + self.base_path + '*.idx')

@@ -29,16 +29,19 @@ def download_days():
 def download_day():
     date = arrow.get().now().date()  # 预报起始时间
     now = arrow.get().now().format('HH')
-    if int(now) > 0 and int(now) < 6:
-        ini_time = arrow.get(date).shift(days=-1, hours=12)
-    elif int(now) > 6 and int(now) < 12:
-        ini_time = arrow.get(date).shift(days=-1, hours=18)
-    elif int(now) > 12 and int(now) < 18:
-        ini_time = arrow.get(date)
-    else:
-        ini_time = arrow.get(date).shift(hours=6)
-    fnl_file = FNL()
-    fnl_file.download(ini_time)
+    for num in range(60)[::-1]:
+        ini_date = arrow.get(date).shift(days=-num)
+        for now in ['02', '08', '14', '20']:
+            if int(now) > 0 and int(now) < 6:
+                ini_time = arrow.get(ini_date).shift(days=-1, hours=12)
+            elif int(now) > 6 and int(now) < 12:
+                ini_time = arrow.get(ini_date).shift(days=-1, hours=18)
+            elif int(now) > 12 and int(now) < 18:
+                ini_time = arrow.get(ini_date)
+            else:
+                ini_time = arrow.get(ini_date).shift(hours=6)
+            fnl_file = FNL()
+            fnl_file.download(ini_time)
 
 
 if __name__ == '__main__':

@@ -3,45 +3,75 @@
 # email: guoappserver@gmail.com
 
 import pandas as pd
-import numpy as np
 import xarray as xr
 import glob
+import os
 import arrow
 
 
-def extract_data(ws_path, uv_path, ini_time, shift_hours):
-    form = 'YYYYMMDDHH'
-    info_file = r'/home/qxs/bma/fish_zone/yuqu-new-20170503.txt'
-    info = pd.read_csv(info_file, sep='\s+', header=None, index_col=0)
-    info.columns = ['code', 'lat', 'lon']
-    for index, row in info.iterrows():
-        code = row['code']
-        lat = row['lat']
-        lon = row['lon']
-        locate = dict(longitude=lon, latitude=lat)
-        for hour in shift_hours[:]:
-            u_file = uv_path + ini_time + '/' + '*{}*u_control*'.format(arrow.get(ini_time, form).shift(hours=hour).format(form))
-            v_file = uv_path + ini_time + '/' + '*{}*v_control*'.format(arrow.get(ini_time, form).shift(hours=hour).format(form))
-            ws_file = ws_path + ini_time + '/' + 'ws_*{}.nc'.format(str(hour).zfill(2))
-            time = np.datetime_as_string(xr.open_dataset(glob.glob(ws_file)[0])['time'].values[0], unit='s', timezone='UTC')
-            time = arrow.get(time).to('Asia/Shanghai').format('YYYY-MM-DD HH:mm:ss')
-            ws= xr.open_dataset(glob.glob(ws_file)[0])['wind_speed'].loc[locate].values[0]
-            u = xr.open_dataset(glob.glob(u_file)[0])['u10'].loc[locate].values[0]
-            v = xr.open_dataset(glob.glob(v_file)[0])['v10'].loc[locate].values[0]
-            wd= 270. - 180/np.pi * np.arctan(v/u)
-            line = '{:10d}, {}, {}, {}, {:4.1f}, {:3.0f}'.format(index, code, time, str(hour).zfill(2), ws, int(wd))
-            print(line)
+class FishCell(object):
+    def __init__(self, ini_time, ec_ens_path, gefs_path, bma_ws):
+        self.ini_time = ini_time
+        self.ec_ens_path = ec_ens_path
+        self.gefs_path = gefs_path
+        self.bma_ws = bma_ws
+
+    def extract(self, shift_hours, info, index, code, lat, lon, out_file):
+        for hour in shift_hours:
+            # get wind speed
+            ws_file = self.bma_ws + 'ws_expect*{}.nc'.format(str(hour).zfill(2))
+            ws = xr.open_dataset(glob.glob(ws_file)[0])['ws'].sel(lat=lat, lon=lon, method='nearest').values[0]
+            # get time initial time format
+            time = arrow.get(self.ini_time).to('Asia/Shanghai').shift(hours=24).format('YYYY-MM-DD HH:mm:ss')
+            # get wind direction
+            uv_name = 'ws_{}_{}.nc'.format(self.ini_time.format('YYYYMMDDHH'), str(hour).zfill(2))
+            if info['wd'] == 'ec_ens':
+                wd = xr.open_dataset(self.ec_ens_path + uv_name)['wd'].sel(latitude=lat, longitude=lon, number=0, method='nearest').values[0]
+            else:
+                wd = xr.open_dataset(self.gefs_path + uv_name)['wd'].sel(latitude=lat, longitude=lon, number=0, method='nearest').values[0]
+            line = '{:4d}, {}, {}, {}, {:4.1f}, {:3.0f}'.format(index, code, time, str(hour - 24).zfill(2), ws, wd)
+            with open(out_file, 'a') as f:
+                f.write(line + '\n')
 
 
-def main():
-    # --路径参数
-    ws_path = '/home/qxs/bma/data/bma_result/'
-    uv_path = '/home/qxs/bma/data/ecmwf_fcst/'
-    # --时间参数
-    ini_time = '2018080712'   # 预报起始时间
-    shift_hours = range(0, 72 + 12, 12)  # 预报时间间隔
-    extract_data(ws_path, uv_path, ini_time, shift_hours)
+def produce_fishzone(ini_time, shift_hours, fishcell_hour):
+    # --检查数据是否全
+    ec_ens_path = '/home/qxs/bma/data/ecmwf_ens/{}/'.format(ini_time.format('YYYYMMDDHH'))
+    gefs_path = '/home/qxs/bma/data/gefs_fcst/{}/'.format(ini_time.format('YYYYMMDDHH'))
+    bma_ws = '/home/qxs/bma/data/bma_result/{}/'.format(ini_time.format('YYYYMMDDHH'))
+    wind_info = {}
+    if len(glob.glob(bma_ws + 'ws_expect*.nc')) == len(shift_hours):
+        wind_info['ws'] = 'bma'
+        uv_name = 'ws_{}*nc'.format(ini_time.format('YYYYMMDDHH')).zfill(2)
+        if len(glob.glob(ec_ens_path + uv_name)) == len(shift_hours):
+            wind_info['wd'] = 'ec_ens'
+        elif len(glob.glob(gefs_path + uv_name)) == len(shift_hours):
+            wind_info['wd'] = 'gefs'
+    # --输出渔区信息
+    if sorted(wind_info.keys()) == sorted(['ws', 'wd']):
+        outpath ='/home/qxs/bma/fish_zone/output/'
+        out_file = outpath + 'FishCell_{}-{}-{}-{}_SeaWind.txt'.format(ini_time.format('YYYY'), ini_time.format('MM'), ini_time.format('DD'), fishcell_hour)
+        try:
+            os.remove(out_file)
+        except FileNotFoundError:
+            pass
+        with open(out_file, 'a') as f:
+            f.write('FISHERYCELL_SeaWind_V100' + '\n')
+        info_file = r'/home/qxs/bma/fish_zone/yuqu-new-20170503.txt'
+        info = pd.read_csv(info_file, sep='\s+', header=None, index_col=0)
+        info.columns = ['code', 'lat', 'lon']
+        for index, row in list(info.iterrows())[:]:
+            code = row['code']
+            lat = row['lat']
+            lon = row['lon']
+            cell = FishCell(ini_time, ec_ens_path, gefs_path, bma_ws)
+            cell.extract(shift_hours, wind_info, index, code, lat, lon, out_file)
 
 
 if __name__ == '__main__':
-    main()
+    # --路径参数
+    outpath ='/home/qxs/bma/fish_zone/output/'
+    # --时间参数
+    ini_time = arrow.get('2019-04-14 12:00')  # 预报起始时间
+    shift_hours = range(24, 96 + 6, 6)
+    produce_fishzone(ini_time, shift_hours)

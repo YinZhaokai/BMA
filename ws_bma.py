@@ -10,10 +10,11 @@ import os
 os.chdir('/home/qxs/bma/')
 from ncprocess import ECEns, FNL, GFSFcst, GEFSFcst, BMA, NCData
 import wind_map
+from fish_zone.fishcell import produce_fishzone
 
 
 def train_prepare(data_path, time_list, region, ini_time):
-    products = ['fnl', 'gefs_fcst', 'ec_ens']
+    products = ['gefs_fcst', 'ec_ens', 'fnl']
     group_info_train = {}
     for product in products[:3]:
         dirs = glob.glob(data_path[product] + 'extract_*')
@@ -44,7 +45,7 @@ def train_prepare(data_path, time_list, region, ini_time):
 
 def fcst_prepare(data_path, time_list, region, ini_time, group_info_train):
     products = ['gefs_fcst', 'ec_ens']
-    products = list(set(group_info_train.keys()) & set(products))
+    products = sorted(list(set(group_info_train.keys()) & set(products)))
     group_info_fcst = {}
     for product in products[:]:
         for time in time_list[:]:
@@ -111,10 +112,12 @@ def main():
     shift_hours = range(24, 96 + interval, interval)  # 预报时间间隔
     time = arrow.get().now().date()   # 预报起始时间
     now = arrow.get().now().format('HH')
-    if int(now) > 12:
+    if int(now) >= 12:
         ini_time = arrow.get(time).shift(days=-1, hours=12)
+        fishcell_hour = '20'
     else:
         ini_time = arrow.get(time).shift(days=-1)
+        fishcell_hour = '08'
     # ini_time = arrow.get('2019040800', 'YYYYMMDDHH')   # 预报起始时间
     for num in range(1):
         for shift_hour in shift_hours[:]:
@@ -126,12 +129,12 @@ def main():
             fcst_list.append({'ini': ini_time, 'shift': shift_hour})
             # -- 数据处理
             group_info_train = train_prepare(model_path, train_list, region, ini_time)
+            # group_info_train = {'ec_ens': 51, 'gefs_fcst':21}
             group_info_fcst = fcst_prepare(model_path, fcst_list, region, ini_time, group_info_train)
             # # group_info = {'ec_ens': 51, 'gefs_fcst':21}
-            print(group_info_train)
-            print(group_info_fcst)
             bma_method(model_path, fcst_list, region, len(train_list), len(train_list) + len(fcst_list), group_info_fcst)
             wind_map.plot(model_path['bma_fcst'] + '{}/'.format(ini_time.format('YYYYMMDDHH')), ini_time, shift_hour)
+    produce_fishzone(ini_time, shift_hours, fishcell_hour)
 
 
 if __name__ == '__main__':
