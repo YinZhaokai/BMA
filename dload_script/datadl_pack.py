@@ -420,7 +420,7 @@ class FNL(object):
             try:
                 sftp.get(remote_file, local_file)
             except Exception as e:
-                print(e)
+                print('{}: {}'.format(remote_file, e))
             finally:
                 print('download {}'.format(local_file))
                 sftp.close()

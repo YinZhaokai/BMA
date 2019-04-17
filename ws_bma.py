@@ -101,7 +101,7 @@ def main():
                         'gefs_fcst': data_path + 'gefs_fcst/',
                         'bma_fcst': data_path + 'bma_result/'}
     # --空间参数
-    region = {'lats': 0, 'latn': 42, 'lonw': 100, 'lone': 130}
+    region = {'lats': 0, 'latn': 42, 'lonw': 100, 'lone': 131}
     x = np.arange(region['lonw'], region['lone'] + 1, 0.5)   # 经度
     y = np.arange(region['lats'], region['latn'] + 1, 0.5)[::-1]   #维度
     lat, lon = np.meshgrid(y, x, indexing='ij')
@@ -114,10 +114,8 @@ def main():
     now = arrow.get().now().format('HH')
     if int(now) >= 12:
         ini_time = arrow.get(time).shift(days=-1, hours=12)
-        fishcell_hour = '20'
     else:
         ini_time = arrow.get(time).shift(days=-1)
-        fishcell_hour = '08'
     # ini_time = arrow.get('2019040800', 'YYYYMMDDHH')   # 预报起始时间
     for num in range(1):
         for shift_hour in shift_hours[:]:
@@ -131,10 +129,11 @@ def main():
             group_info_train = train_prepare(model_path, train_list, region, ini_time)
             # group_info_train = {'ec_ens': 51, 'gefs_fcst':21}
             group_info_fcst = fcst_prepare(model_path, fcst_list, region, ini_time, group_info_train)
-            # # group_info = {'ec_ens': 51, 'gefs_fcst':21}
+            # group_info = {'ec_ens': 51, 'gefs_fcst':21}
             bma_method(model_path, fcst_list, region, len(train_list), len(train_list) + len(fcst_list), group_info_fcst)
             wind_map.plot(model_path['bma_fcst'] + '{}/'.format(ini_time.format('YYYYMMDDHH')), ini_time, shift_hour)
-    produce_fishzone(ini_time, shift_hours, fishcell_hour)
+    if ini_time.to('Asia/Shanghai').format('HH') == '08':
+        produce_fishzone(ini_time, shift_hours, ini_time.to('Asia/Shanghai').format('HH'))
 
 
 if __name__ == '__main__':

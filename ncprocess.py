@@ -401,9 +401,6 @@ class GEFSFcst(NCData):
                     else:
                         print('GEFS fcst wind composite: {}'.format(uv_file))
                         ws = (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5
-                        print(ws)
-                        wd_value = mpcalc.wind_direction(uv["u10"], uv["v10"]).magnitude
-                        print(wd_value.shape)
                         wd = ws.copy(data=mpcalc.wind_direction(uv["u10"], uv["v10"]).magnitude)
                         wind = xr.Dataset({'ws': ws, 'wd': wd})
                         wind = wind.expand_dims(['valid_time', 'number']).drop(['time', 'step']).rename({'valid_time': 'time'})

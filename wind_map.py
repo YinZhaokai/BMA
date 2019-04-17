@@ -10,6 +10,9 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeat
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 from cartopy.io.shapereader import Reader, natural_earth
+import geopandas
+import salem
+from matplotlib.colors import BoundaryNorm
 import iris.plot as iplt
 from matplotlib import cm
 import matplotlib.pyplot as plt
@@ -39,7 +42,7 @@ class WindNC(object):
         return self.ds
 
     def map(self):
-        shp_path = '/home/qxs/bma/shp/'
+        shp_path = '/home/qxs/bma/shp/cn_shp/'
         # --创建画图空间
         proj = ccrs.PlateCarree()  # 创建坐标系
         fig = plt.figure(figsize=(6, 8), dpi=400)  # 创建页面
@@ -50,11 +53,11 @@ class WindNC(object):
         provinces = cfeat.ShapelyFeature(Reader(shp_path + 'bou2_4l.shp').geometries(),
                                        proj, edgecolor='k', facecolor=cfeat.COLORS['land'])
         # ax.add_feature(provinces, linewidth=0.6, zorder=2)
-        ax.add_feature(borders, linewidth=0.6, zorder=1)
-        ax.add_feature(cfeat.COASTLINE.with_scale('50m'), linewidth=0.6, zorder=1)  # 加载分辨率为50的海岸线
-        # ax.add_feature(cfeat.RIVERS.with_scale('50m'), zorder=1)  # 加载分辨率为50的河流
-        # ax.add_feature(cfeat.LAKES.with_scale('50m'), zorder=1)  # 加载分辨率为50的湖泊
-        ax.set_extent([100, 130, 0, 42])
+        ax.add_feature(borders, linewidth=0.6, zorder=10)
+        ax.add_feature(cfeat.COASTLINE.with_scale('50m'), linewidth=0.6, zorder=10)  # 加载分辨率为50的海岸线
+        # ax.add_feature(cfeat.RIVERS.with_scale('50m'), zorder=10)  # 加载分辨率为50的河流
+        # ax.add_feature(cfeat.LAKES.with_scale('50m'), zorder=10)  # 加载分辨率为50的湖泊
+        ax.set_extent([100, 131, 0, 42])
         # --设置网格点属性
         gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
                           linewidth=1.2, color='k', alpha=0.5, linestyle='--')
@@ -66,7 +69,7 @@ class WindNC(object):
         gl.ylocator = mticker.FixedLocator(np.arange(-5, 45+5, 5))
         return ax
 
-    def plot_wind_power(self):
+    def power(self):
         levels = [0, 8., 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7, 70]
         levels_label = [u'<5级', u' 5级', u' 6级', u' 7级', u' 8级', u' 9级', u' 10级', u' 11级', u'>11级']
         wind = self.ds['ws'].to_iris()
@@ -87,12 +90,13 @@ class WindNC(object):
         # --标题
         fcst_time = self.ini_time.shift(hours=self.shift_hour).format('YYYY-MM-DD HH:mm')
         ini_time = self.ini_time.format('YYYY-MM-DD HH:mm')
-        titile = '风力等级图 \n  预报时间：{}  \n初始时间：{}'.format(fcst_time, ini_time)
+        titile = '风力等级图 \n  预报时间:{} UTC  \n初始时间:{} UTC'.format(fcst_time, ini_time)
         ax.set_title(titile, fontsize=18)
+        # --存图
         plt.savefig(self.path + 'ws_maxexpect_{}_{}.png'.format(self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
         # plt.show()
 
-    def plot_wind_prob(self, level):
+    def prob(self, level):
         levels = {6: [10.8, 13.9],
                     8: [17.2, 20.8]}
         ax = self.map()
@@ -120,11 +124,42 @@ class WindNC(object):
             # --标题
             fcst_time = self.ini_time.shift(hours=self.shift_hour).format('YYYY-MM-DD HH:mm')
             ini_time = self.ini_time.format('YYYY-MM-DD HH:mm')
-            titile = '{}级风概率图 \n  预报时间：{}  \n初始时间：{}'.format(level, fcst_time, ini_time)
+            titile = '{}级风概率图 \n  预报时间:{} UTC  \n初始时间:{} UTC'.format(level, fcst_time, ini_time)
             ax.set_title(titile, fontsize=18)
+            # --存图
             plt.savefig(self.path + 'ws_{}prob_{}_{}.png'.format(str(level), self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
             # plt.show()
 
+    def fishcell(self):
+        proj = ccrs.PlateCarree()
+        levels = [0, 0.3, 1.6, 3.4, 5.5, 8., 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7]
+        cmap = plt.get_cmap('Spectral_r')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+        # --shp数据
+        shp_path = '/home/qxs/bma/shp/fish_shp/'
+        ax = self.map()
+        fishcell = geopandas.read_file(shp_path + 'FishCellALL.shp')
+        ax.add_geometries(fishcell.geometry, crs=proj, edgecolor='k', facecolor='none', zorder=9)
+        # --风速数据
+        wind = self.ds['ws']
+        new_lon = np.linspace(wind.lon[0], wind.lon[-1], wind.lon.shape[0] * 2)
+        new_lat = np.linspace(wind.lat[0], wind.lat[-1], wind.lat.shape[0]  * 2)
+        wind = wind.interp(lat=new_lat, lon=new_lon)
+        wind_mask = wind.salem.roi(shape=fishcell).to_iris()
+        # --画图
+        im = iplt.pcolormesh(wind_mask, cmap=cmap, axes=ax, norm=norm)
+        # --画色标
+        cbr = plt.colorbar(im, fraction=0.06, pad=0.04, norm=norm)
+        cbr.set_ticks(levels)
+        # --标题
+        fcst_time = self.ini_time.shift(hours=self.shift_hour).format('YYYY-MM-DD HH:mm')
+        ini_time = self.ini_time.format('YYYY-MM-DD HH:mm')
+        titile = '渔区风力图 \n  预报时间:{} UTC  \n初始时间:{} UTC'.format(fcst_time, ini_time)
+        ax.set_title(titile, fontsize=18)
+        # --存图
+        plt.savefig(self.path + 'ws_fishcell_{}_{}.png'.format(self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
+        # plt.show()
+    
 
 def plot(path, ini_time, shift_hour):
     plot_types = ['expect', 'prob']
@@ -133,11 +168,22 @@ def plot(path, ini_time, shift_hour):
         ds = xr.open_dataset(files[0])
         wind = WindNC(ds, path, ini_time, shift_hour)
         if plot_type == 'expect':
-            wind.plot_wind_power()
+            wind.power()
+            wind.fishcell()
         elif plot_type == 'prob':
             pass
-            wind.plot_wind_prob(6)
-            wind.plot_wind_prob(8)
+            wind.prob(6)
+            wind.prob(8)
+
+
+def plot_fishcell(path, ini_time, shift_hour):
+    plot_types = ['expect']
+    for plot_type in plot_types[:]:
+        files = glob.glob(path + '*{}*{}.nc'.format(plot_type, str(shift_hour)))
+        ds = xr.open_dataset(files[0])
+        wind = WindNC(ds, path, ini_time, shift_hour)
+        wind.fishcell()
+
 
 
 if __name__ == '__main__':
@@ -148,4 +194,5 @@ if __name__ == '__main__':
     path = '/home/qxs/bma/data/bma_result/{}/'.format(ini_time.format('YYYYMMDDHH'))
     shift_hours = range(24, 96 + 6, 6)  # 预报时间间隔
     for shift_hour in shift_hours[:1]:
-        plot(path, ini_time, shift_hour)
+        # plot(path, ini_time, shift_hour)
+        plot_fishcell(path, ini_time, shift_hour)
