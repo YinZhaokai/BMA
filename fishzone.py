@@ -158,5 +158,5 @@ if __name__ == '__main__':
     # --生成渔区文件
     out_file = fishzone_product(model_path, ini_time, shift_hours)
     # out_file = '/data2/fish_zone/2019051700/FishCell_2019-05-17_SeaWind_72.txt'
-    send_ftp('202.108.199.26', 'fahf', 'fahf!123', out_file)
-    send_ftp('128.5.10.64', 'fisherygrid_wind', 'fisherygrid_wind', out_file)
+    send_ftp('xxx.xxx.xxx.xx', 'xxxx', 'xxxxxxxx', out_file)
+    send_ftp('xxx.x.xx.xx', 'xxxx', 'xxxxxxxx', out_file)
