@@ -277,10 +277,10 @@ class ECEns(NCData):
 
 class GFSFcst(object):
     def __init__(self):
-        self.ip = '128.5.10.21'
-        self.port = 22
-        self.username = 'orca'
-        self.password = 'chess@123'
+        self.ip = 'xxxx.xx.xx.xx'
+        self.port = xx
+        self.username = 'xx'
+        self.password = 'xxxx'
         self.remote_path = '/public/home/orca/GFSDATA/'
         self.local_path = '/data2/gfs_dataset/'
 
