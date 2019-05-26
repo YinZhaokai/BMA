@@ -21,8 +21,11 @@ from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 
 
 class WindNC(object):
-    def __init__(self, ds, path, ini_time, shift_hour):
-        self.ds = ds.squeeze('time').drop(['time'])
+    def __init__(self, ds, path=None, ini_time=None, shift_hour=None):
+        if 'time' in ds.dims:
+            self.ds = ds.squeeze('time').drop(['time'])
+        else:
+            self.ds = ds
         self.path = path
         self.ini_time = ini_time
         self.shift_hour = shift_hour
@@ -106,17 +109,20 @@ class WindNC(object):
         for n, prob in enumerate(probs):
             wind_value = self.ds['ws'].sel(prob=str(float('{:.2f}'.format(1- prob)))).values
             wind_prob = np.where((wind_value>=levels[level][0]) & (wind_value<levels[level][-1]), prob, np.nan)
-            if n ==0:
+            if n == 0:
                 wind_probs[n, :, :] = wind_prob
             else:
                 wind_probs[n, :, :] = np.where((wind_prob==prob), prob, wind_probs[n-1, :, :])
-        prob_da = xr.DataArray(wind_probs[-1, :, :], coords=[self.ds.lat, self.ds.lon], dims=['lat', 'lon']).to_iris()
+        prob_da = xr.DataArray(wind_probs[-1, :, :], coords=[self.ds.lat, self.ds.lon], dims=['lat', 'lon'])
+        cube = prob_da.to_iris()
         # --画图
         try:
-            plot = iplt.contourf(prob_da, levels=ticks, cmap='Spectral_r', axes=ax)
+            plot = iplt.contourf(cube, levels=ticks, cmap='Spectral_r', axes=ax)
         except ValueError:
             print('{}级风概率图无数据，不出图。'.format(level))
         else:
+            xr.Dataset({'prob': prob_da}).to_netcdf(self.path + 'ws_{}prob_{}_{}.nc'.format(
+                str(level), self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
             # --画色标
             cbar = plt.colorbar(plot, fraction=0.06, pad=0.04)
             cbar.set_ticks(list(map(lambda x: sum(ticks[x: x + 2]) / 2, range(len(ticks) - 1))))
@@ -130,9 +136,8 @@ class WindNC(object):
             plt.savefig(self.path + 'ws_{}prob_{}_{}.png'.format(str(level), self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
             # plt.show()
 
-    def fishcell(self):
+    def fishcell(self, levels=[0, 0.3, 1.6, 3.4, 5.5, 8., 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7], title=None):
         proj = ccrs.PlateCarree()
-        levels = [0, 0.3, 1.6, 3.4, 5.5, 8., 10.8, 13.9, 17.2, 20.8, 24.5, 28.5, 32.7]
         cmap = plt.get_cmap('Spectral_r')
         norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
         # --shp数据
@@ -142,48 +147,38 @@ class WindNC(object):
         ax.add_geometries(fishcell.geometry, crs=proj, edgecolor='k', facecolor='none', zorder=9)
         # --风速数据
         wind = self.ds['ws']
-        new_lon = np.linspace(wind.lon[0], wind.lon[-1], wind.lon.shape[0] * 2)
-        new_lat = np.linspace(wind.lat[0], wind.lat[-1], wind.lat.shape[0]  * 2)
+        new_lon = np.linspace(wind.lon[0]-0.25, wind.lon[-1]-0.25, wind.lon.shape[0])
+        new_lat = np.linspace(wind.lat[0]-0.25, wind.lat[-1]-0.25, wind.lat.shape[0])
         wind = wind.interp(lat=new_lat, lon=new_lon)
         wind_mask = wind.salem.roi(shape=fishcell).to_iris()
         # --画图
-        im = iplt.pcolormesh(wind_mask, cmap=cmap, axes=ax, norm=norm)
+        im = iplt.pcolor(wind_mask, cmap=cmap, axes=ax, norm=norm)
         # --画色标
         cbr = plt.colorbar(im, fraction=0.06, pad=0.04, norm=norm)
         cbr.set_ticks(levels)
         # --标题
-        fcst_time = self.ini_time.shift(hours=self.shift_hour).format('YYYY-MM-DD HH:mm')
-        ini_time = self.ini_time.format('YYYY-MM-DD HH:mm')
-        titile = '渔区风力图 \n  预报时间:{} UTC  \n初始时间:{} UTC'.format(fcst_time, ini_time)
-        ax.set_title(titile, fontsize=18)
-        # --存图
-        plt.savefig(self.path + 'ws_fishcell_{}_{}.png'.format(self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
-        # plt.show()
-    
-
-def plot(path, ini_time, shift_hour):
-    plot_types = ['expect', 'prob']
-    for plot_type in plot_types[:]:
-        files = glob.glob(path + '*{}*{}.nc'.format(plot_type, str(shift_hour)))
-        ds = xr.open_dataset(files[0])
-        wind = WindNC(ds, path, ini_time, shift_hour)
-        if plot_type == 'expect':
-            wind.power()
-            wind.fishcell()
-        elif plot_type == 'prob':
-            pass
-            wind.prob(6)
-            wind.prob(8)
+        if self.ini_time != None and self.shift_hour != None:
+            fcst_time = self.ini_time.shift(hours=self.shift_hour).format('YYYY-MM-DD HH:mm')
+            ini_time = self.ini_time.format('YYYY-MM-DD HH:mm')
+            title = '渔区风速图 \n  预报时间:{} UTC  \n初始时间:{} UTC'.format(fcst_time, ini_time)
+            ax.set_title(title, fontsize=18)
+            # --存图
+            plt.savefig(self.path + 'ws_fishcell_{}_{}.png'.format(self.ini_time.format('YYYYMMDDHH'), str(self.shift_hour)))
+            # plt.show()
+        else:
+            ax.set_title(title, fontsize=18)
+            plt.show()
 
 
-def plot_fishcell(path, ini_time, shift_hour):
-    plot_types = ['expect']
-    for plot_type in plot_types[:]:
-        files = glob.glob(path + '*{}*{}.nc'.format(plot_type, str(shift_hour)))
-        ds = xr.open_dataset(files[0])
-        wind = WindNC(ds, path, ini_time, shift_hour)
+def plot(ds, ini_time, shift_hour):
+    path = '/home/qxs/bma/data/bma_result/{}/'.format(ini_time.format('YYYYMMDDHH'))
+    wind = WindNC(ds, path, ini_time, shift_hour)
+    if 'expect' in ds.coords['prob'].values:
+        wind.power()
         wind.fishcell()
-
+    else:
+        wind.prob(6)
+        wind.prob(8)
 
 
 if __name__ == '__main__':
@@ -194,5 +189,8 @@ if __name__ == '__main__':
     path = '/home/qxs/bma/data/bma_result/{}/'.format(ini_time.format('YYYYMMDDHH'))
     shift_hours = range(24, 96 + 6, 6)  # 预报时间间隔
     for shift_hour in shift_hours[:1]:
-        # plot(path, ini_time, shift_hour)
-        plot_fishcell(path, ini_time, shift_hour)
+        plot_types = ['expect', 'prob']
+        for plot_type in plot_types[:]:
+            files = glob.glob(path + '*{}*{}.nc'.format(plot_type, str(shift_hour)))
+            ds = xr.open_dataset(files[0])
+            plot(ds, ini_time, shift_hour)

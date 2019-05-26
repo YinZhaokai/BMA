@@ -28,7 +28,7 @@ def download_days():
 
 def download_day():
     date = arrow.get().now().date()  # 预报起始时间
-    now = arrow.get().now().format('HH')
+    # now = arrow.get().now().format('HH')
     for num in range(60)[::-1]:
         ini_date = arrow.get(date).shift(days=-num)
         for now in ['02', '08', '14', '20']:

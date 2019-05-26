@@ -275,39 +275,37 @@ class ECEns(NCData):
                     ws.to_netcdf(composite_file)
 
 
-class GFSFcst(NCData):
-    def __init__(self, data_path, time=None, base_path=None):
-        self.host = r'https://nomads.ncdc.noaa.gov/data/gfs4/'
-        self.header = {'User-Agent':
-                           'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 '
-                           '(KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
-        self.data_path = data_path
-        self.time = time
-        self.base_path = base_path + '/'
-        super(GFSFcst, self).__init__(self.data_path)
+class GFSFcst(object):
+    def __init__(self):
+        self.ip = '128.5.10.21'
+        self.port = 22
+        self.username = 'orca'
+        self.password = 'chess@123'
+        self.remote_path = '/public/home/orca/GFSDATA/'
+        self.local_path = '/data2/gfs_dataset/'
 
     @retry(stop=(stop_after_attempt(5)))
-    def download(self):
-        download_path = self.data_path + self.base_path
-        try:
-            os.makedirs(download_path)
-        except OSError:
-            pass
-        finally:
-            url = self.host + self.time['ini'].format('YYYYMM') + '/' + self.time['ini'].format('YYYYMMDD') + '/'
-            file_name = 'gfs_4_{}_{}00_{}.grb2'.format(self.time['ini'].format('YYYYMMDD'), self.time['ini'].format('HH'),
-                                                       str(self.time['shift']).zfill(3))
-            url = url + file_name
-            download_file = download_path + file_name
-            if not os.path.exists(download_file) or os.path.getsize(download_file)/float(1024*1024) < 50:
-                print('GFS forecast download: {}'.format(download_file))
-                response = requests.get(url, headers=self.header, stream=True, timeout=15)
-                with open(download_file, 'wb') as f:
-                    for data in response.iter_content(chunk_size=1024):
-                        if data:
-                            f.write(data)
-                            f.flush()
-        return download_file
+    def download(self, time):
+        time_path = time.format('YYYYMMDDHH') + '/'
+        remote_file = self.remote_path + time_path + 'nwp_GFS_UV10_{}.nc'.format(time.format('YYYYMMDDHH'))
+        local_file = self.local_path + time_path +  'nwp_GFS_UV10_{}.nc'.format(time.format('YYYYMMDDHH'))
+        if not os.path.exists(local_file) or os.path.getsize(local_file) / float(1024 * 1024) < 210:
+            try:
+                os.mkdir(self.local_path + time_path)
+            except Exception:
+                pass
+            ssh = paramiko.Transport((self.ip, self.port))
+            ssh.connect(username=self.username, password=self.password)
+            sftp = paramiko.SFTPClient.from_transport(ssh)
+            try:
+                sftp.get(remote_file, local_file)
+            except Exception as e:
+                print('{}: {}'.format(remote_file, e))
+            finally:
+                print('download {}'.format(local_file))
+                sftp.close()
+            if os.path.getsize(local_file) / float(1024 * 1024) < 210:
+                os.remove(local_file)
 
     def wind_composite(self, uv_file):
         ini_time = self.time['ini'].format('YYYYMMDDHH')
@@ -341,7 +339,7 @@ class GEFSFcst(NCData):
         self.base_path = base_path + '/'
         super(GEFSFcst, self).__init__(self.data_path)
 
-    @retry()
+    @retry(stop=(stop_after_attempt(50)))
     def download(self, num):
         download_path = self.gefs_path + self.base_path
         try:

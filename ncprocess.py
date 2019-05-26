@@ -297,56 +297,50 @@ class ECEns(NCData):
 
 class GFSFcst(NCData):
     def __init__(self, data_path, time, base_path=None):
-        self.host = r'https://nomads.ncdc.noaa.gov/data/gfs4/'
-        self.header = {'User-Agent':
-                           'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 '
-                           '(KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'}
+        self.gfs_path = sorted(glob.glob('/data2/gfs_dataset/*'))[-1] + '/'
         self.data_path = data_path
         self.time = time
-        self.base_path = base_path + '/'
+        self.base_path = self.gfs_path.split('/')[-1]
         super(GFSFcst, self).__init__(data_path)
 
-    @retry(stop=(stop_after_attempt(5)))
+    @retry(stop=(stop_after_attempt(15)))
     def download(self):
-        download_path = self.data_path + self.base_path
+        uv_file = glob.glob(self.gfs_path + 'nwp*.nc')
+        download_path = self.data_path + uv_file[0].split('/')[-2] + '/'
         try:
             os.makedirs(download_path)
         except OSError:
             pass
-        finally:
-            url = self.host + self.time['ini'].format('YYYYMM') + '/' + self.time['ini'].format('YYYYMMDD') + '/'
-            file_name = 'gfs_4_{}_{}00_{}.grb2'.format(self.time['ini'].format('YYYYMMDD'), self.time['ini'].format('HH'),
-                                                       str(self.time['shift']).zfill(3))
-            url = url + file_name
-            download_file = download_path + file_name
-            if not os.path.exists(download_file) or os.path.getsize(download_file)/float(1024*1024) < 50:
-                print('GFS forecast download: {}'.format(download_file))
-                response = requests.get(url, headers=self.header, stream=True, timeout=15)
-                with open(download_file, 'wb') as f:
-                    for data in response.iter_content(chunk_size=1024):
-                        if data:
-                            f.write(data)
-                            f.flush()
+        if uv_file:
+            download_file = download_path +  uv_file[0].split('/')[-1]
+            if not os.path.exists(download_file):
+                try:
+                    os.symlink(uv_file[0],  download_file)
+                except OSError as e:
+                    print(e)
+        else:
+            download_file = None
         return download_file
 
     def wind_composite(self, uv_file):
         ini_time = self.time['ini'].format('YYYYMMDDHH')
         shift_time = str(self.time['shift']).zfill(2)
         composite_name = 'ws_{}_{}.nc'.format(ini_time, shift_time)
-        composite_file = self.data_path + self.base_path + composite_name
+        composite_file = os.path.dirname(uv_file) + '/' + composite_name
+        # os.system('rm {}'.format(composite_file))
         if not os.path.exists(composite_file):
             try:
-                uv = xr.open_dataset(uv_file, engine='cfgrib',
-                                          backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
+                uv = xr.open_dataset(uv_file)
             except Exception as e:
-                print('Wind Composite Failed: no uv files in {}: {}'.format(composite_file, e))
+                print('GFS fcst Wind composite failed: {} -> {}'.format(uv_file, e))
                 return
             else:
-                ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5})
-                ws = ws.expand_dims('valid_time').drop(['time', 'step']).rename({'valid_time': 'time'}).expand_dims('number', 1)
-                ws.to_netcdf(composite_file)
-                print('GFS fcst wind composite: {}'.format(composite_file))
-            os.system('rm {}'.format(self.data_path + self.base_path + '*.idx'))
+                # print('GFS fcst wind composite: {}'.format(uv_file))
+                uv = uv.sel(time=self.time['ini'].shift(hours=self.time['shift']).datetime).expand_dims('time')
+                ws = (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5
+                wd = ws.copy(data=mpcalc.wind_direction(uv["u10"], uv["v10"]).magnitude)
+                wind = xr.Dataset({'ws': ws, 'wd': wd}).squeeze('record')
+                wind.to_netcdf(composite_file)
 
 
 class GEFSFcst(NCData):
@@ -361,7 +355,7 @@ class GEFSFcst(NCData):
         self.base_path = base_path + '/'
         super(GEFSFcst, self).__init__(data_path)
 
-    @retry()
+    @retry(stop=(stop_after_attempt(5)))
     def download(self):
         grib_files = '*f0{}*.grb2'.format(str(self.time['shift']).zfill(2))
         download_path = self.data_path + self.base_path
@@ -545,6 +539,9 @@ class BMA(object):
         except OSError:
             pass
         finally:
-            data.sel(prob='expect').to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('expect', ini_time, shift_time))
-            data.sel(prob=prob[2:]).to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('prob', ini_time, shift_time))
+            maxexpect = data.sel(prob='expect')
+            prob = data.sel(prob=prob[2:])
+            maxexpect.to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('expect', ini_time, shift_time))
+            prob.to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('prob', ini_time, shift_time))
             print('success: {} bma file create in {} use {}'.format(shift_time, bma_out_path, self.model_info))
+            return maxexpect, prob
