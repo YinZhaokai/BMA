@@ -395,10 +395,10 @@ class GEFSFcst(NCData):
 
 class FNL(object):
     def __init__(self):
-        self.ip = '128.5.6.18'
-        self.port = 22
-        self.username = 'qxs'
-        self.password = 'qxs123'
+        self.ip = 'xxx.x.x.xx'
+        self.port = xx
+        self.username = 'xxx'
+        self.password = 'xxxxxxx'
         self.remote_path = '/share/wind/data/origin/NCEP0p5/'
         self.local_path = '/data2/fnl/'
 
