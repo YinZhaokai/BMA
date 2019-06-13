@@ -30,14 +30,14 @@ class NCData():
         start = self.start
         end = self.end
         while start <= end:
-            bma_path = self.bma_path + start.format('YYYYMMDDHH') + '/*expect_*' + str(shift_hour).zfill(2) + '.nc'
+            bma_path = self.bma_path + start.format('YYYYMMDDHH') + '/ws_expect_{}_{}.nc'.format(start.format('YYYYMMDDHH'), str(shift_hour).zfill(2))
             fnl_path = self.fnl_path + start.format('YYYYMMDDHH') + '/*_' + str(shift_hour).zfill(2) + '.nc'
             if glob.glob(bma_path) and glob.glob(fnl_path):
                 time_list.append(start)
             start = start.shift(hours=12)
         for time in time_list:
             if label == 'bma':
-                file_path = self.bma_path + time.format('YYYYMMDDHH') + '/*expect_*' + str(shift_hour).zfill(2) + '.nc'
+                file_path = self.bma_path + time.format('YYYYMMDDHH') + '/ws_expect_{}_{}.nc'.format(time.format('YYYYMMDDHH'), str(shift_hour).zfill(2))
             else:
                 file_path = self.fnl_path + time.format('YYYYMMDDHH') + '/*_' + str(shift_hour).zfill(2) + '.nc'
             try:
@@ -72,13 +72,16 @@ class NCData():
         # fnl_data = bma_data.copy(data=fnl_data.data[:, ::-1, :])
         rmse =  xr.Dataset({'ws': np.sqrt(((bma_data - fnl_data) ** 2).mean(dim='time'))}).rename({'longitude': 'lon', 'latitude':'lat'})
         mae = xr.Dataset({'ws': (abs(bma_data - fnl_data)).mean(dim='time')}).rename({'longitude': 'lon', 'latitude':'lat'})
+        mre = xr.Dataset({'ws': (abs(bma_data - fnl_data) / fnl_data).mean(dim='time')}).rename({'longitude': 'lon', 'latitude':'lat'})
         # print(mae.ws.sel(lat=30, lon=110))
         new_lon = np.linspace(rmse.lon[0] - 0.25, rmse.lon[-1] - 0.25, rmse.lon.shape[0])
         new_lat = np.linspace(rmse.lat[0] - 0.25, rmse.lat[-1] - 0.25, rmse.lat.shape[0])
         rmse_cell = rmse.interp(lat=new_lat, lon=new_lon).salem.roi(shape=fishcell)
         mae_cell = mae.interp(lat=new_lat, lon=new_lon).salem.roi(shape=fishcell)
+        mre_cell = mre.interp(lat=new_lat, lon=new_lon).salem.roi(shape=fishcell)
         rmse_region = {}
         mae_region = {}
+        mre_region = {}
         seas = ['all', 'bohuang', 'dong', 'nan']
         seas_region = [{'latn': 43, 'lats': 0}, {'latn': 43, 'lats': 32}, {'latn': 32, 'lats': 22}, {'latn': 22, 'lats': 0}]
         for sea, region in list(zip(seas, seas_region)):
@@ -86,8 +89,10 @@ class NCData():
             # index = np.where(np.where(np.isnan(rmse_cell.sel(lat=new_lat[(new_lat >= region['lats']) & (new_lat < region['latn'])]).ws), False, True) == True)
             # print(index[0].shape)
             mae_region[sea] = mae_cell.sel(lat=new_lat[(new_lat >= region['lats']) & (new_lat < region['latn'])]).mean().ws.values
+            mre_region[sea] = mre_cell.sel(lat=new_lat[(new_lat >= region['lats']) & (new_lat < region['latn'])]).mean().ws.values
         print('rmse', rmse_region)
         print('mae', mae_region)
+        print('mre', mre_region)
         return rmse, mae
 
     def plot(self):
@@ -98,7 +103,7 @@ class NCData():
 
 def main():
     start = arrow.get('2019-04-01')
-    end = arrow.get('2019-04-22')
+    end = arrow.get('2019-05-30')
     interval = 24
     hours = range(24, 96 + interval, interval)  # 预报时间间隔
     for hour in hours[:]:

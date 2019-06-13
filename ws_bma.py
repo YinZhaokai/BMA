@@ -82,7 +82,6 @@ def bma_method(data_path, fcst_list, region, train_num, all_num, group_info_fcst
                 shutil.rmtree(dir)
             except OSError:
                 pass
-        print('bma start... ')
         single_bma = BMA(data_path, fcst_time, region, group_info_fcst)
         single_bma.process_all(train_num, all_num)
         maxexpect, prob = single_bma.point2nc()
@@ -102,7 +101,7 @@ def main():
                         'gefs_fcst': data_path + 'gefs_fcst/',
                         'bma_fcst': data_path + 'bma_result/'}
     # --空间参数
-    region = {'lats': 0, 'latn': 42, 'lonw': 100, 'lone': 131}
+    region = {'lats': 0, 'latn': 45, 'lonw': 105, 'lone': 130}
     x = np.arange(region['lonw'], region['lone'] + 1, 0.5)   # 经度
     y = np.arange(region['lats'], region['latn'] + 1, 0.5)[::-1]   #维度
     lat, lon = np.meshgrid(y, x, indexing='ij')
@@ -117,7 +116,7 @@ def main():
         ini_time = arrow.get(date).shift(days=-1, hours=12)
     else:
         ini_time = arrow.get(date).shift(days=-1)
-    # ini_time = arrow.get('2019033000', 'YYYYMMDDHH')   # 预报起始时间
+    # ini_time = arrow.get('2019052900', 'YYYYMMDDHH')   # 预报起始时间
     # -- 数据处理
     for day_num in range(1):
         for shift_hour in shift_hours[:]:

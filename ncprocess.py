@@ -8,6 +8,7 @@ import arrow
 import iris
 import os
 import glob
+import logging
 import requests
 from pathos.pools import ProcessPool
 from ecmwfapi import ECMWFDataServer
@@ -16,6 +17,33 @@ import sys
 import metpy.calc as mpcalc
 sys.path.append("/home/qxs/bma")
 import bma_method
+
+_date = arrow.get(arrow.get().date())
+_now = arrow.get().now().format('HH')
+if int(_now) >= 12:
+    _time = _date.shift(hours=12).format('YYYY-MM-DD-HH')
+else:
+    _time = _date.format('YYYY-MM-DD-HH')
+_log = '/home/qxs/bma/bmalog/{}.log'.format(_time)
+
+
+class Logger(object):
+    @classmethod
+    def __init__(cls, filename, level='info', when='D', backCount=3,
+                 fmt='%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s'):
+        level_relations = {
+            'debug': logging.DEBUG,
+            'info': logging.INFO,
+            'warning': logging.WARNING,
+            'error': logging.ERROR,
+            'crit': logging.CRITICAL
+        }
+        cls.logger = logging.getLogger(filename)
+        format_str = logging.Formatter(fmt)#设置日志格式
+        cls.logger.setLevel(level_relations.get(level))#设置日志级别
+        th = logging.handlers.TimedRotatingFileHandler(filename=filename,when=when,backupCount=backCount,encoding='utf-8')
+        th.setFormatter(format_str)#设置文件里写入的格式
+        cls.logger.addHandler(th)
 
 
 class NCData(object):
@@ -49,7 +77,7 @@ class NCData(object):
                     try:
                         ws = ws_exist.isel(time=0, drop=True)
                     except Exception as e:
-                        print('merge file failed {} -> {}'.format(merge_file, e))
+                        Logger(_log, level='debug').logger.warning('merge file failed {} -> {}'.format(merge_file, e))
                         return None, None
                     else:
                         ws_time = pd.to_datetime(time['ini'].shift(hours=time['shift']).format('YYYYMMDDHH'),
@@ -58,12 +86,12 @@ class NCData(object):
                         ws = ws.expand_dims('time', 0)
                         ws['ws'].values[:, :, :, :] = 9999.
                 else:
-                    print('{}: {}'.format(time, e))
+                    Logger(_log, level='debug').logger.info('{}: {}'.format(time, e))
                     merge_file = None
                     ens_num = 0
                     return merge_file, ens_num
             dataset.append(ws)
-        print('merge time: {}'.format(merge_file))
+        # Logger(_log, level='debug').logger.info('merge time: {}'.format(merge_file))
         ws_all = xr.auto_combine(dataset)
         for key in ws_all.dims.keys():
             if  key not in ['latitude', 'longitude', 'time', 'number']:
@@ -163,7 +191,7 @@ class ECReanalysis(NCData):
         uv = xr.open_dataset(uv_file)
         ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5}).expand_dims('number', 1)
         if not os.path.exists(composite_file):
-            print('EC reanalysis wind composite: {}'.format(composite_file))
+            Logger(_log, level='debug').logger.info('EC reanalysis wind composite: {}'.format(composite_file))
             ws.to_netcdf(composite_file)
         return composite_file
 
@@ -193,7 +221,7 @@ class ECFine(NCData):
                     try:
                         os.symlink(uv_file[0],  download_file)
                     except OSError as e:
-                        print(e)
+                        Logger(_log, level='debug').logger.info(e)
             else:
                 download_file = None
             return download_file
@@ -207,11 +235,11 @@ class ECFine(NCData):
         try:
             uv = xr.open_dataset(uv_file).sel(time=fcst_time.datetime).expand_dims('time')
         except Exception as e:
-            print('EC fine wind composite failed {}: {}'.format(e, composite_file))
+            Logger(_log, level='debug').logger.warning('EC fine wind composite failed {}: {}'.format(e, composite_file))
         else:
             ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5}).expand_dims('number', 1)
             if not os.path.exists(composite_file):
-                print('EC fine wind composite: {}'.format(composite_file))
+                Logger(_log, level='debug').logger.info('EC fine wind composite: {}'.format(composite_file))
                 ws.to_netcdf(composite_file)
 
 
@@ -265,9 +293,9 @@ class ECEns(NCData):
                     u_cube = iris.load(uv_file['u'][0])[0][:, :, :, :]
                     v_cube = iris.load(uv_file['v'][0])[0][:, :, :, :]
                 except IndexError:
-                    print('EC Ens Wind Composite Failed: no uv files in {}'.format(self.data_path + self.base_path))
+                    Logger(_log, level='debug').logger.info('EC Ens Wind Composite Failed: no uv files in {}'.format(self.data_path + self.base_path))
                 else:
-                    print('EC Ens wind composite: {}'.format(composite_file))
+                    Logger(_log, level='debug').logger.info('EC Ens wind composite: {}'.format(composite_file))
                     ws = np.zeros(shape=(u_cube.shape[0], u_cube.shape[1] + 1, u_cube.shape[2], u_cube.shape[3]))
                     wd = np.zeros(shape=(u_cube.shape[0], u_cube.shape[1] + 1, u_cube.shape[2], u_cube.shape[3]))
                     for member in list(range(u_cube.shape[1] + 1))[:]:
@@ -317,7 +345,7 @@ class GFSFcst(NCData):
                 try:
                     os.symlink(uv_file[0],  download_file)
                 except OSError as e:
-                    print(e)
+                    Logger(_log, level='debug').logger.info(e)
         else:
             download_file = None
         return download_file
@@ -332,7 +360,7 @@ class GFSFcst(NCData):
             try:
                 uv = xr.open_dataset(uv_file)
             except Exception as e:
-                print('GFS fcst Wind composite failed: {} -> {}'.format(uv_file, e))
+                Logger(_log, level='debug').logger.warning('GFS fcst Wind composite failed: {} -> {}'.format(uv_file, e))
                 return
             else:
                 # print('GFS fcst wind composite: {}'.format(uv_file))
@@ -390,10 +418,10 @@ class GEFSFcst(NCData):
                         uv = xr.open_dataset(uv_file, engine='cfgrib',
                                              backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
                     except Exception as e:
-                        print('GEFS fcst Wind composite failed: uv files broken {} -> {}'.format(uv_file, e))
+                        Logger(_log, level='debug').logger.warning('GEFS fcst Wind composite failed: uv files broken {} -> {}'.format(uv_file, e))
                         return
                     else:
-                        print('GEFS fcst wind composite: {}'.format(uv_file))
+                        Logger(_log, level='debug').logger.info('GEFS fcst wind composite: {}'.format(uv_file))
                         ws = (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5
                         wd = ws.copy(data=mpcalc.wind_direction(uv["u10"], uv["v10"]).magnitude)
                         wind = xr.Dataset({'ws': ws, 'wd': wd})
@@ -402,7 +430,7 @@ class GEFSFcst(NCData):
                 wind_ens = xr.auto_combine(dataset)
                 wind_ens.to_netcdf(composite_file)
             else:
-                print('GEFS fcst wind composite failes: no enough grb files in {}'.format(self.gefs_path + self.base_path))
+                Logger(_log, level='debug').logger.info('GEFS fcst wind composite failes: no enough grb files in {}'.format(self.gefs_path + self.base_path))
         idx_files = glob.glob(self.data_path + self.base_path + '*.idx')
         for file in idx_files:
             os.remove(file)
@@ -433,7 +461,7 @@ class FNL(NCData):
                     try:
                         os.symlink(uv_file[0],  download_file)
                     except OSError as e:
-                        print(e)
+                        Logger(_log, level='debug').logger.info(e)
             else:
                 download_file = None
             return download_file
@@ -448,13 +476,13 @@ class FNL(NCData):
                 uv = xr.open_dataset(uv_file, engine='cfgrib',
                                           backend_kwargs={'filter_by_keys': {'typeOfLevel': 'heightAboveGround', 'level': 10}})
             except Exception as e:
-                print('Wind Composite Failed: no uv files in {}: {}'.format(composite_file, e))
+                Logger(_log, level='debug').logger.warning('Wind Composite Failed: no uv files in {}: {}'.format(composite_file, e))
                 return
             else:
                 ws = xr.Dataset({'ws': (uv["u10"] ** 2 + uv["v10"] ** 2) ** 0.5})
                 ws = ws.expand_dims('valid_time').drop(['time', 'step']).rename({'valid_time': 'time'}).expand_dims('number', 1)
                 ws.to_netcdf(composite_file)
-                print('FNL wind composite: {}'.format(composite_file))
+                Logger(_log, level='debug').logger.info('FNL wind composite: {}'.format(composite_file))
             os.system('rm {}'.format(self.data_path + self.base_path + '*.idx'))
 
 
@@ -491,7 +519,7 @@ class BMA(object):
         try:
             concat_frame = pd.concat(frames, axis=1)
         except Exception as e:
-            print('Concat failed: {}'.format(e))
+            Logger(_log, level='debug').logger.info('Concat failed: {}'.format(e))
         else:
             concat_frame.round(decimals=2).to_csv(fcst_point_file, sep=' ', index=True, header=None)
         # print('BMA process: {} ---Run task {}'.format(bma_point_file, os.getpid()))
@@ -525,14 +553,14 @@ class BMA(object):
             try:
                 result = pd.read_table(bma_point_file, sep='\s+', header=None, na_values=[9999., -9999.], names=prob)
             except Exception as e:
-                print('point2nc failed: no {} -> {}'.format(bma_point_file, e))
+                Logger(_log, level='debug').logger.warning('point2nc failed: no {} -> {}'.format(bma_point_file, e))
                 return
                 # data['ws'].loc[selected] = [np.nan] * len(prob[1:])
             else:
                 try:
                     data['ws'].loc[selected] = result[result.time==int(fcst_time.format('YYYYMMDDHH'))].iloc[0, 1:].values
                 except Exception as e:
-                    print('point2nc failed in {} -> {}'.format(time, e))
+                    Logger(_log, level='debug').logger.warning('point2nc failed in {} -> {}'.format(time, e))
                     return
         try:
             os.mkdir(bma_out_path)
@@ -543,5 +571,5 @@ class BMA(object):
             prob = data.sel(prob=prob[2:])
             maxexpect.to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('expect', ini_time, shift_time))
             prob.to_netcdf(bma_out_path + 'ws_{}_{}_{}.nc'.format('prob', ini_time, shift_time))
-            print('success: {} bma file create in {} use {}'.format(shift_time, bma_out_path, self.model_info))
+            Logger(_log, level='debug').logger.info('success: {} bma file create in {} use {}'.format(shift_time, bma_out_path, self.model_info))
             return maxexpect, prob

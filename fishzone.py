@@ -13,7 +13,16 @@ import  sys
 sys.path.append("/home/qxs/bma")
 sys.path.append("/home/qxs/bma/dload_script")
 import ncprocess
+from ncprocess import Logger
 import datadl_pack
+
+_date = arrow.get(arrow.get().date())
+_now = arrow.get().now().format('HH')
+if int(_now) >= 12:
+    _time = _date.shift(hours=12).format('YYYY-MM-DD-HH')
+else:
+    _time = _date.format('YYYY-MM-DD-HH')
+_log = '/home/qxs/bma/fishzonelog/{}.log'.format(_time)
 
 
 class FishCell(object):
@@ -61,13 +70,13 @@ def celldata_produce(ini_time, shift_hours, wind_info, model_path, initime_path)
     for key in wind_info.keys():
         value = wind_info[key]
         if value == 'bma':
-            print('{} use {}'.format(key, bma_path))
+            Logger(_log, level='debug').logger.info('{} use {}'.format(key, bma_path))
         elif value == 'gefs':
-            print('{} use {}'.format(key, gefs_path))
+            Logger(_log, level='debug').logger.info('{} use {}'.format(key, gefs_path))
         elif value == 'ec_ens':
-            print('{} use {}'.format(key, ec_ens_path))
+            Logger(_log, level='debug').logger.info('{} use {}'.format(key, ec_ens_path))
         else:
-            print('{} use {}'.format(key, gfs_path))
+            Logger(_log, level='debug').logger.info('{} use {}'.format(key, gfs_path))
     # --输出渔区信息
     if sorted(wind_info.keys()) == sorted(['ws', 'wd']):
         outpath =fishzone_path + '{}/'.format(ini_time.shift(days=1).format('YYYYMMDDHH'))
@@ -99,7 +108,7 @@ def fishzone_product(model_path, ini_time, shift_hours):
     try:
         datadl_pack.GFSFcst().download(ini_time.shift(hours=12))
     except Exception as e:
-        print('GFS can not get from remote server -> {}'.format(e))
+        Logger(_log, level='debug').logger.info('GFS can not get from remote server -> {}'.format(e))
     # --检查bma和gfs哪个数据源完整，优先使用bma算法结果
     initime_path = '{}/'.format(ini_time.format('YYYYMMDDHH'))
     ec_ens_path = model_path['ec_ens'] + initime_path
@@ -107,7 +116,7 @@ def fishzone_product(model_path, ini_time, shift_hours):
     bma_path = model_path['bma_fcst'] + initime_path
     wind_info = {}
     if set(glob.glob(bma_path + 'ws_expect*.nc')).issubset(set(glob.glob(bma_path + '*'))) and len(glob.glob(bma_path + 'ws_expect*.nc')) == len(shift_hours):
-        print('use bma data to generate fish zone product')
+        Logger(_log, level='debug').logger.info('use bma data to generate fish zone product')
         wind_info['ws'] = 'bma'
         if set(glob.glob(ec_ens_path + 'ws_*.nc')).issubset(set(glob.glob(ec_ens_path + '*'))) and len(glob.glob(ec_ens_path + 'ws_*.nc')) == len(shift_hours):
             wind_info['wd'] = 'ec_ens'
@@ -116,7 +125,7 @@ def fishzone_product(model_path, ini_time, shift_hours):
         else:
             wind_info['wd'] = 'gfs'
     else:
-        print('use gfs data to generate fish zone product')
+        Logger(_log, level='debug').logger.info('use gfs data to generate fish zone product')
         wind_info['ws'] = 'gfs'
         wind_info['wd'] = 'gfs'
         for shift_hour in shift_hours[:]:
